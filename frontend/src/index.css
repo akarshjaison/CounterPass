@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-950 text-slate-100 font-sans antialiased overflow-x-hidden;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(13, 242, 123, 0.05) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(56, 189, 248, 0.05) 0px, transparent 50%);
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-950;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-800 rounded-full hover:bg-slate-700 transition-colors;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-slate-900/60 border border-slate-800/80 rounded-2xl shadow-glass backdrop-blur-glass;
+  }
+  
+  .glass-card-glow {
+    @apply bg-slate-900/75 border border-sports-neon/20 rounded-2xl shadow-glass-glow backdrop-blur-glass;
+  }
+  
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-900/50 transition-all duration-200;
+  }
+  
+  .sidebar-link-active {
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-sports-neon bg-slate-900 border border-sports-neon/20 shadow-glass-glow transition-all duration-200;
+  }
+
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-sports-neon to-emerald-500 text-slate-950 font-semibold rounded-xl shadow-glass-glow hover:brightness-110 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-3 bg-slate-900/80 border border-slate-800 text-slate-200 font-semibold rounded-xl hover:bg-slate-800/80 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2;
+  }
+
+  .badge-success {
+    @apply px-2.5 py-1 bg-sports-neon/15 text-sports-neon border border-sports-neon/20 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .badge-inferred {
+    @apply px-2.5 py-1 bg-sports-inferred/15 text-sports-inferred border border-sports-inferred/20 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .badge-danger {
+    @apply px-2.5 py-1 bg-sports-intercept/15 text-sports-intercept border border-sports-intercept/20 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .badge-warning {
+    @apply px-2.5 py-1 bg-sports-warning/15 text-sports-warning border border-sports-warning/20 rounded-full text-xs font-semibold uppercase tracking-wider;
+  }
+}
+
+/* Custom animations */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 15px rgba(13, 242, 123, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 25px rgba(13, 242, 123, 0.4);
+  }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s infinite;
+}
