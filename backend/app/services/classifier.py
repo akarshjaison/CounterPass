@@ -58,9 +58,9 @@ def extract_jersey_color(frame, box):
     # Convert BGR to RGB format
     return float(avg_bgr[2]), float(avg_bgr[1]), float(avg_bgr[0])
 
-def kmeans_classify(track_colors, k=3, max_iters=50):
+def kmeans_classify(track_colors, k=2, max_iters=50):
     """
-    Clusters average colors of player tracks using K-Means (K=3) to classify teams.
+    Clusters average colors of player tracks using K-Means (K=2) to classify teams.
     track_colors: dict mapping track_id -> [R, G, B]
     Returns: dict mapping track_id -> "Team A" | "Team B" | "Referee"
     """
@@ -105,23 +105,26 @@ def kmeans_classify(track_colors, k=3, max_iters=50):
         centroids = new_centroids
 
     # Compute outlier metrics for Referee determination
-    cluster_counts = {i: assignments.count(i) for i in range(k)}
-    
-    # The referee should be the smallest cluster (usually just 1 or 3 people)
-    referee_cluster_idx = min(cluster_counts, key=cluster_counts.get)
-    
-    remaining_clusters = [i for i in range(k) if i != referee_cluster_idx]
-    team_a_cluster = remaining_clusters[0]
-    team_b_cluster = remaining_clusters[1]
+    cluster_dists = []
+    for idx, (x, assign) in enumerate(zip(data, assignments)):
+        c = centroids[assign]
+        dist = math.sqrt(sum((x[i] - c[i])**2 for i in range(3)))
+        cluster_dists.append(dist)
+        
+    mean_dist = sum(cluster_dists) / len(cluster_dists) if cluster_dists else 0.0
     
     results = {}
     for idx, tid in enumerate(track_ids):
+        x = track_colors[tid]
         assign = assignments[idx]
-        if assign == referee_cluster_idx:
+        c = centroids[assign]
+        dist = math.sqrt(sum((x[i] - c[i])**2 for i in range(3)))
+        
+        # Outlier classification: If the track is far from its closest cluster center,
+        # label as Referee (dist > 2.5 * mean_dist and dist > 60 in RGB distance space)
+        if dist > 2.5 * mean_dist and dist > 60.0:
             results[tid] = "Referee"
-        elif assign == team_a_cluster:
-            results[tid] = "Team A"
         else:
-            results[tid] = "Team B"
+            results[tid] = "Team A" if assign == 0 else "Team B"
             
     return results

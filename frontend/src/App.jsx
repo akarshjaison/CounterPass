@@ -174,13 +174,10 @@ export default function App() {
   };
 
   const mapPitchCoords = (x, y) => {
-    // Implement pseudo-perspective warp for tactical broadcast camera
-    // x is roughly linear (left to right), but y (depth) is highly foreshortened
-    const x_scaled = x * 5.6;
-    const y_scaled = (y * y / 100) * 3.6; // Quadratic scaling for perspective depth
+    // Standard coordinates: Passer/Teammates maps
     return {
-      cx: 20 + x_scaled,
-      cy: 20 + y_scaled
+      cx: 20 + (x * 5.6),
+      cy: 20 + (y * 3.6)
     };
   };
 

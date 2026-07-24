@@ -124,8 +124,8 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
             flight_time = flight_frames / fps
             
             # A valid pass has a reasonable flight time
-            # Using 3 frames minimum to filter out possession jitter and false passes
-            if 3 <= flight_frames <= int(3.0 * fps):
+            # Using 1 frame minimum to ensure quick passes are counted
+            if 1 <= flight_frames <= int(3.0 * fps):
                 team_A = get_player_team(carrier_A)
                 team_B = get_player_team(carrier_B)
                 
