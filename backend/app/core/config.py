@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     DECAY_LAMBDA: float = 0.5  # Confidence decay parameter for temporally inferred options (confidence = orig * exp(-lambda * time))
     MAX_LOST_FRAMES: int = 30  # Number of frames to retain lost tracks
     TEMPORAL_BUFFER_SIZE: int = 60  # Number of frames to store in the sliding window buffer
-    POSSESSION_DISTANCE_THRESHOLD: float = 40.0  # Pixels in frame coordinates or cm in pitch coordinates
+    POSSESSION_DISTANCE_THRESHOLD: float = 100.0  # Pixels in frame coordinates or cm in pitch coordinates
     LANE_SAFETY_RADIUS: float = 25.0  # Danger radius for lane interception
     
     # Option Scoring Weights

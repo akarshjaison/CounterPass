@@ -15,7 +15,6 @@ export default function App() {
   const [videoPreview, setVideoPreview] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploading, setUploading] = useState(false);
-  const [analysisMode, setAnalysisMode] = useState('demo'); // 'demo' or 'real'
   
   // Active job states
   const [currentJob, setCurrentJob] = useState(null);
@@ -158,7 +157,7 @@ export default function App() {
       const startRes = await fetch(`${API_BASE}/analysis/start/${videoData.id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: analysisMode, video_id: videoData.id })
+        body: JSON.stringify({ video_id: videoData.id })
       });
       if (!startRes.ok) throw new Error("Could not start job");
       const jobData = await startRes.json();
@@ -174,13 +173,14 @@ export default function App() {
     }
   };
 
-  // Pitch Drawing helper coordinates mapping
-  // Map x/y percentages (0-100) onto SVG space (0-600 width, 0-400 height)
   const mapPitchCoords = (x, y) => {
-    // Standard coordinates: Passer/Teammates maps
+    // Implement pseudo-perspective warp for tactical broadcast camera
+    // x is roughly linear (left to right), but y (depth) is highly foreshortened
+    const x_scaled = x * 5.6;
+    const y_scaled = (y * y / 100) * 3.6; // Quadratic scaling for perspective depth
     return {
-      cx: 20 + (x * 5.6),
-      cy: 20 + (y * 3.6)
+      cx: 20 + x_scaled,
+      cy: 20 + y_scaled
     };
   };
 
@@ -188,7 +188,7 @@ export default function App() {
   const getPitchPositionsForEvent = (event) => {
     if (!event) return { passer: null, receiver: null, options: [], opponents: [] };
     
-    // Check if the event contains dynamic coordinates from the backend
+    // Use dynamic coordinates from the backend if available
     if (event.passer_x !== undefined && event.passer_x !== null) {
       return {
         passer: { id: event.passer_track_id, x: event.passer_x, y: event.passer_y },
@@ -208,82 +208,20 @@ export default function App() {
       };
     }
     
-    // Customize positions per mock pass
-    if (event.timestamp === 4.5) {
-      return {
-        passer: { id: 8, x: 40, y: 30 },
-        receiver: { id: 10, x: 60, y: 40 },
-        options: [
-          { id: 10, x: 60, y: 40, score: 0.88, source: 'observed' },
-          { id: 7, x: 50, y: 80, score: 0.82, source: 'observed' },
-          { id: 9, x: 52, y: 15, score: 0.65, source: 'temporally_inferred' },
-          { id: 11, x: 75, y: 45, score: 0.45, source: 'observed' }
-        ],
-        opponents: [
-          { id: 12, x: 48, y: 35 },
-          { id: 14, x: 68, y: 43 },
-          { id: 15, x: 55, y: 65 }
-        ]
-      };
-    } else if (event.timestamp === 12.2) {
-      return {
-        passer: { id: 14, x: 55, y: 65 },
-        receiver: { id: 17, x: 80, y: 75 },
-        options: [
-          { id: 17, x: 80, y: 75, score: 0.75, source: 'observed' },
-          { id: 16, x: 68, y: 85, score: 0.72, source: 'observed' },
-          { id: 18, x: 72, y: 35, score: 0.58, source: 'observed' }
-        ],
-        opponents: [
-          { id: 3, x: 62, y: 70 },
-          { id: 5, x: 75, y: 45 }
-        ]
-      };
-    } else if (event.timestamp === 19.8) {
-      return {
-        passer: { id: 10, x: 50, y: 50 },
-        receiver: { id: 7, x: 75, y: 80 },
-        options: [
-          { id: 7, x: 75, y: 80, score: 0.42, source: 'observed' },
-          { id: 11, x: 65, y: 15, score: 0.89, source: 'observed' },
-          { id: 8, x: 38, y: 48, score: 0.61, source: 'observed' }
-        ],
-        opponents: [
-          { id: 15, x: 67, y: 70 }, // Intercepting
-          { id: 13, x: 60, y: 35 }
-        ]
-      };
-    } else if (event.timestamp === 28.5) {
-      return {
-        passer: { id: 18, x: 45, y: 50 },
-        receiver: { id: 20, x: 30, y: 25 },
-        options: [
-          { id: 20, x: 30, y: 25, score: 0.78, source: 'observed' },
-          { id: 22, x: 22, y: 70, score: 0.81, source: 'temporally_inferred' }
-        ],
-        opponents: [
-          { id: 4, x: 32, y: 40 },
-          { id: 2, x: 38, y: 22 }
-        ]
-      };
-    } else {
-      // Default / general fallback positions
-      return {
-        passer: { id: event.passer_track_id, x: 35, y: 40 },
-        receiver: { id: event.receiver_track_id, x: 60, y: 50 },
-        options: [
-          { id: event.receiver_track_id, x: 60, y: 50, score: event.confidence, source: 'observed' }
-        ],
-        opponents: [
-          { id: 99, x: 50, y: 45 }
-        ]
-      };
-    }
+    // Generic fallback if coordinates are not yet resolved
+    return {
+      passer: { id: event.passer_track_id, x: 35, y: 40 },
+      receiver: { id: event.receiver_track_id, x: 60, y: 50 },
+      options: [
+        { id: event.receiver_track_id, x: 60, y: 50, score: event.confidence, source: 'observed' }
+      ],
+      opponents: []
+    };
   };
 
   const getTeamLabel = (trackId) => {
-    if (trackId === 99) return "Referee";
-    return trackId <= 11 ? "Team A" : "Team B";
+    const p = players.find(player => player.track_id === trackId);
+    return p ? p.team : "Unknown";
   };
 
   // Selected details
@@ -493,41 +431,16 @@ export default function App() {
                   </h3>
 
                   <div className="flex flex-col gap-3">
-                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Analysis Mode</label>
-                    
-                    <button 
-                      onClick={() => setAnalysisMode('demo')}
-                      className={`p-4 rounded-xl border text-left flex flex-col gap-1 transition-all ${
-                        analysisMode === 'demo' 
-                          ? 'border-sports-neon bg-sports-neon/5 text-white' 
-                          : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
+                    <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Analysis Pipeline</label>
+                    <div className="p-4 rounded-xl border border-sports-neon bg-sports-neon/5 text-white flex flex-col gap-1">
                       <div className="flex justify-between items-center font-bold text-sm">
-                        <span>Demo / Simulated Mode</span>
-                        {analysisMode === 'demo' && <div className="w-2.5 h-2.5 rounded-full bg-sports-neon"></div>}
+                        <span>Real CV Analytics</span>
+                        <div className="w-2.5 h-2.5 rounded-full bg-sports-neon"></div>
                       </div>
                       <span className="text-[11px] leading-relaxed text-slate-400">
-                        Uses high-fidelity precomputed tracking results. Perfect for reviewing features immediately.
+                        Runs full YOLOv8 player/ball detection and temporal tracking. Weights are downloaded automatically on first use.
                       </span>
-                    </button>
-
-                    <button 
-                      onClick={() => setAnalysisMode('real')}
-                      className={`p-4 rounded-xl border text-left flex flex-col gap-1 transition-all ${
-                        analysisMode === 'real' 
-                          ? 'border-sports-neon bg-sports-neon/5 text-white' 
-                          : 'border-slate-800 bg-slate-950/40 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex justify-between items-center font-bold text-sm">
-                        <span>Real CV Analytics (GPU-Accelerated)</span>
-                        {analysisMode === 'real' && <div className="w-2.5 h-2.5 rounded-full bg-sports-neon"></div>}
-                      </div>
-                      <span className="text-[11px] leading-relaxed text-slate-400">
-                        Runs full YOLO player/ball detection models and compiles tracking records (Stubs in Phase 1).
-                      </span>
-                    </button>
+                    </div>
                   </div>
                 </div>
 
@@ -652,8 +565,26 @@ export default function App() {
               </div>
               <div className="flex gap-3 bg-slate-900/60 p-1.5 rounded-xl border border-slate-800">
                 <span className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-850 text-xs font-semibold text-sports-neon">
-                  {analysisMode === 'demo' ? "DEMO MODE (PRECOMPUTED)" : "REAL CV PIPELINE"}
+                  REAL CV PIPELINE
                 </span>
+              </div>
+            </div>
+
+            {/* ANNOTATED VIDEO PREVIEW */}
+            <div className="glass-card p-4 flex flex-col gap-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileVideo className="w-5 h-5 text-sports-neon" />
+                Processed Tactical Footage
+              </h3>
+              <div className="relative aspect-video rounded-xl overflow-hidden bg-slate-950 border border-slate-850 shadow-inner">
+                <video 
+                  src={`${API_BASE}/analysis/${currentJob.id}/video`} 
+                  className="w-full h-full object-cover" 
+                  controls 
+                  autoPlay
+                  loop
+                  muted
+                />
               </div>
             </div>
 
@@ -850,10 +781,26 @@ export default function App() {
         )}
 
         {/* TACTICAL EVENTS DETAIL TAB */}
-        {activeTab === 'events' && activeEvent && (
+        {activeTab === 'events' && (
           <section className="p-8 flex flex-col gap-6 flex-1">
             <h2 className="text-3xl font-extrabold text-white">Tactical Option Board</h2>
             
+            {!activeEvent ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 glass-card">
+                <Shield className="w-16 h-16 text-slate-700 mb-4" />
+                <h3 className="text-xl font-bold text-white mb-2">No Passing Events Detected</h3>
+                <p className="text-slate-400 max-w-md">
+                  The temporal computer vision pipeline could not identify any valid passing events in this video segment.
+                  This can happen if no clear ball movement was detected between players, or if the video does not contain tactical football footage.
+                </p>
+                <button 
+                  onClick={() => setActiveTab('upload')}
+                  className="mt-6 btn-primary"
+                >
+                  Analyze New Video
+                </button>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch flex-1">
               
               {/* Option List Sidebar */}
@@ -1139,6 +1086,7 @@ export default function App() {
               </div>
 
             </div>
+            )}
           </section>
         )}
 

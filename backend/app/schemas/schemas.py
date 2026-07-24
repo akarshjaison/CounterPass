@@ -27,11 +27,9 @@ class AnalysisJobBase(BaseModel):
     progress: float
     current_stage: Optional[str] = None
     error_message: Optional[str] = None
-    mode: str
 
 class AnalysisJobCreate(BaseModel):
     video_id: int
-    mode: str = "real"  # "real" or "demo"
 
 class AnalysisJobResponse(AnalysisJobBase):
     id: int

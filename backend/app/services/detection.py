@@ -1,176 +1,46 @@
 import os
-# pyrefly: ignore [missing-import]
 import cv2
-import math
-import random
 import numpy as np
-# pyrefly: ignore [missing-import]
 from sqlalchemy.orm import Session
 from app.models.models import PlayerDetection
 from app.core.config import settings
 
-def get_player_pos_at_frame(track_id: int, f: int, base_positions: dict) -> tuple:
-    """
-    Computes a player's simulated 2D position at a specific frame index.
-    """
-    bx, by = base_positions.get(track_id, (960, 540))
-    t = f * 0.02
-    dx = 150.0 * math.sin(t + track_id)
-    dy = 80.0 * math.cos(t * 1.5 + track_id)
-    return bx + dx, by + dy
+PT_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "yolov8n.pt")
 
-def get_simulated_ball_position(f: int, fps: float, base_positions: dict) -> tuple:
+def _ensure_yolo_weights(weights_path: str) -> None:
     """
-    Computes the ball's simulated position, interpolating between players to mirror mock pass events.
+    Ensures the YOLOv8n ONNX weights file exists.
+    Exports it from the local yolov8n.pt using the ultralytics library.
     """
-    sec = f / fps
-    
-    # Ball passing sequence timeline:
-    # 0s to 3s: Ball with Player 8 (Team A Midfielder)
-    # 3s to 4.5s: Ball traveling from Player 8 to Player 10 (Pass 1)
-    # 4.5s to 10s: Ball with Player 10
-    # 10s to 12.2s: Ball traveling from Player 14 to Player 17 (Pass 2)
-    # 12.2s to 18s: Ball with Player 17
-    # 18s to 19.8s: Ball traveling from Player 10 to Player 7 (Pass 3)
-    # 19.8s to 26s: Ball with Player 7
-    # 26s to 28.5s: Ball traveling from Player 18 to Player 20 (Pass 4)
-    # 28.5s+: Ball with Player 20
-    segments = [
-        (0.0, 3.0, 8, 8),
-        (3.0, 4.5, 8, 10),
-        (4.5, 10.0, 10, 10),
-        (10.0, 12.2, 14, 17),
-        (12.2, 18.0, 17, 17),
-        (18.0, 19.8, 10, 7),
-        (19.8, 26.0, 7, 7),
-        (26.0, 28.5, 18, 20),
-        (28.5, 999.0, 20, 20)
-    ]
-    
-    for start, end, p1, p2 in segments:
-        if start <= sec < end:
-            x1, y1 = get_player_pos_at_frame(p1, f, base_positions)
-            x2, y2 = get_player_pos_at_frame(p2, f, base_positions)
-            
-            duration = end - start
-            if duration <= 0 or p1 == p2:
-                return x1, y1
-            
-            t = (sec - start) / duration
-            bx = x1 + (x2 - x1) * t
-            by = y1 + (y2 - y1) * t
-            return bx, by
-            
-    return 960, 540
+    if os.path.exists(weights_path):
+        return
 
-def run_simulated_detection(db: Session, job_id: int, video_path: str, downsample_fps: float = 5.0):
-    """
-    Simulates a high-fidelity tactical broad view video stream, writing 
-    frame-by-frame player and ball detections to the database.
-    """
-    cap = cv2.VideoCapture(video_path)
-    fps_val = cap.get(cv2.CAP_PROP_FPS)
-    width_val = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    height_val = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    frame_count_val = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-    cap.release()
+    os.makedirs(os.path.dirname(weights_path), exist_ok=True)
+    pt_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "models", "yolov8n.pt"))
 
-    fps = float(fps_val) if fps_val and fps_val > 0 else 30.0
-    width = int(width_val) if width_val and width_val > 0 else 1920
-    height = int(height_val) if height_val and height_val > 0 else 1080
-    frame_count = int(frame_count_val) if frame_count_val and frame_count_val > 0 else 300
+    if not os.path.exists(pt_path):
+        raise RuntimeError(
+            f"YOLOv8n weights not found at {pt_path}. "
+            "Please place yolov8n.pt in backend/app/models/."
+        )
 
-    frame_interval = max(1, int(fps / downsample_fps))
-    
-    # Base layout coordinates matching teams and referee
-    # Team A: 1-11, Team B: 12-22, Referee: 99
-    base_positions = {
-        1: (150, 540),
-        2: (400, 200),
-        3: (400, 400),
-        4: (400, 680),
-        5: (400, 880),
-        6: (700, 300),
-        7: (700, 540),
-        8: (700, 780),
-        9: (1000, 200),
-        10: (1000, 540),
-        11: (1000, 880),
-        
-        12: (1770, 540),
-        13: (1520, 200),
-        14: (1520, 400),
-        15: (1520, 680),
-        16: (1520, 880),
-        17: (1220, 300),
-        18: (1220, 540),
-        19: (1220, 780),
-        20: (920, 200),
-        21: (920, 540),
-        22: (920, 880),
-        
-        99: (960, 500),
-    }
+    print(f"[Detection] Exporting {pt_path} -> {weights_path} (ONNX) ...")
+    try:
+        from ultralytics import YOLO  # type: ignore
+        model = YOLO(pt_path)
+        model.export(format="onnx", imgsz=640, opset=12)
+        # ultralytics exports next to the .pt file; move it to weights_path
+        exported = pt_path.replace(".pt", ".onnx")
+        if os.path.exists(exported) and exported != weights_path:
+            import shutil
+            shutil.move(exported, weights_path)
+        print(f"[Detection] Export complete: {weights_path}")
+    except ImportError:
+        raise RuntimeError(
+            "ultralytics package is required to export ONNX weights. "
+            "Run: pip install ultralytics"
+        )
 
-    detections = []
-    
-    # Consistent seeds for reproducible mocks
-    random.seed(job_id)
-    
-    for f in range(0, frame_count, frame_interval):
-        timestamp = f / fps
-        
-        # Save player & referee positions
-        for track_id, (bx, by) in base_positions.items():
-            x, y = get_player_pos_at_frame(track_id, f, base_positions)
-            x = max(50, min(width - 50, x))
-            y = max(50, min(height - 50, y))
-            
-            w = float(30 + random.randint(-2, 2))
-            h = float(60 + random.randint(-4, 4))
-            
-            x_min = float(x - w / 2)
-            y_min = float(y - h / 2)
-            x_max = float(x + w / 2)
-            y_max = float(y + h / 2)
-            
-            detections.append(PlayerDetection(
-                job_id=job_id,
-                frame_index=f,
-                timestamp=timestamp,
-                track_id=track_id,
-                x_min=x_min,
-                y_min=y_min,
-                x_max=x_max,
-                y_max=y_max,
-                center_x=float(x),
-                center_y=float(y),
-                confidence=float(0.85 + 0.14 * random.random()),
-                class_id=0 if track_id != 99 else 1
-            ))
-            
-        # Save ball position
-        bx, by = get_simulated_ball_position(f, fps, base_positions)
-        bx = max(10, min(width - 10, bx))
-        by = max(10, min(height - 10, by))
-        
-        detections.append(PlayerDetection(
-            job_id=job_id,
-            frame_index=f,
-            timestamp=timestamp,
-            track_id=None,
-            x_min=float(bx - 10),
-            y_min=float(by - 10),
-            x_max=float(bx + 10),
-            y_max=float(by + 10),
-            center_x=float(bx),
-            center_y=float(by),
-            confidence=float(0.75 + 0.20 * random.random()),
-            class_id=32
-        ))
-        
-    db.add_all(detections)
-    db.commit()
 
 def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: str, downsample_fps: float = 5.0):
     """
@@ -232,7 +102,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                         boxes.append([x, y, w, h])
                         confidences.append(float(person_score))
                         class_ids.append(0)
-                    elif ball_score > 0.3:
+                    elif ball_score > 0.1:
                         cx, cy, w, h = output[0, i], output[1, i], output[2, i], output[3, i]
                         x = int((cx - w/2) * (width / 640.0))
                         y = int((cy - h/2) * (height / 640.0))
@@ -252,7 +122,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                 
                 b_boxes = [boxes[idx] for idx in ball_indices]
                 b_confs = [confidences[idx] for idx in ball_indices]
-                nms_b = cv2.dnn.NMSBoxes(b_boxes, b_confs, 0.3, 0.5)
+                nms_b = cv2.dnn.NMSBoxes(b_boxes, b_confs, 0.1, 0.5)
                 
                 tracker_inputs = []
                 for idx in nms_p:
@@ -366,20 +236,15 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
             ))
         db.commit()
 
-def run_player_detection(db: Session, job_id: int, video_path: str, mode: str):
+def run_player_detection(db: Session, job_id: int, video_path: str):
     """
     Main entry point for player and ball detection pipeline.
-    Runs real CV detection if YOLOv8 weights are found, otherwise falls back gracefully to simulation.
+    Always runs real YOLOv8 ONNX detection if possible.
     """
     weights_path = os.path.join(settings.BASE_DIR, "app", "models", "yolov8n.onnx")
-    
-    # Fallback to simulation if mode is demo or YOLO weights are missing
-    if mode == "demo" or not os.path.exists(weights_path):
-        run_simulated_detection(db, job_id, video_path)
-    else:
-        try:
-            run_yolo_detection(db, job_id, video_path, weights_path)
-        except Exception as e:
-            # Degrade gracefully to simulated pipeline to keep backend functional
-            print(f"YOLO detection error, falling back to simulation: {e}")
-            run_simulated_detection(db, job_id, video_path)
+    try:
+        _ensure_yolo_weights(weights_path)
+        run_yolo_detection(db, job_id, video_path, weights_path)
+    except Exception as e:
+        print(f"[Detection] YOLOv8 detection failed: {e}. Gracefully skipping CV detection.")
+        pass

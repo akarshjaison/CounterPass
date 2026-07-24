@@ -37,3 +37,9 @@ frontend/dist/
 *.njsproj
 *.sln
 *.swp
+
+# ML Models & Test Videos
+backend/app/models/*.onnx
+backend/app/models/*.pt
+*.webm
+backend/pyrightconfig.json

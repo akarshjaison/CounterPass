@@ -1,10 +1,9 @@
 import os
-# pyrefly: ignore [missing-import]
 import cv2
 import math
 from typing import Dict, List, Tuple
 from sqlalchemy.orm import Session
-from app.models.models import Video, AnalysisJob, PlayerDetection, PassEvent, PlayerTrack
+from app.models.models import AnalysisJob, PlayerDetection, PassEvent, PlayerTrack
 from app.core.config import settings
 
 def annotate_video(db: Session, job_id: int):
@@ -21,7 +20,7 @@ def annotate_video(db: Session, job_id: int):
         return
         
     # Output path
-    output_filename = f"job_{job_id}_annotated.mp4"
+    output_filename = f"job_{job_id}_annotated.webm"
     output_path = os.path.join(settings.OUTPUT_DIR, output_filename)
     
     # Open Capture
@@ -37,13 +36,13 @@ def annotate_video(db: Session, job_id: int):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 300
     
-    # Video Writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    # Video Writer (Use VP9 for web compatibility)
+    fourcc = cv2.VideoWriter_fourcc(*'vp09')
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
     
     if not writer.isOpened():
-        # Fallback to other writer codecs
-        fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        # Fallback to VP8
+        fourcc = cv2.VideoWriter_fourcc(*'vp80')
         writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
         
     if not writer.isOpened():
