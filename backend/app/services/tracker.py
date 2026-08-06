@@ -82,7 +82,7 @@ class SimpleTracker:
                     (det['box'][1] + det['box'][3]) / 2.0
                 )
                 dist = math.sqrt((tc[0] - dc[0])**2 + (tc[1] - dc[1])**2)
-                if dist < 120.0:  # Match if centers are within 120 pixels
+                if dist < 220.0:  # Match if centers are within 220 pixels
                     dist_candidates.append((dist, tid, idx))
 
         # Greedy match based on smallest distance first
@@ -132,27 +132,66 @@ class SimpleTracker:
                     track['velocity'] = (track['velocity'][0] * 0.85, track['velocity'][1] * 0.85)
                     updated_tracks[tid] = track
 
-        # 6. Initialize new tracks for unmatched high-confidence detections
+        # 6. Initialize or re-associate tracks for unmatched high-confidence detections
         unmatched_dets = [idx for idx in range(len(detections)) if idx not in matched_dets]
         for idx in unmatched_dets:
             det = detections[idx]
             if det['confidence'] >= 0.4:
-                tid = self.next_id
-                self.next_id += 1
                 box = det['box']
                 center = (
                     (box[0] + box[2]) / 2.0,
                     (box[1] + box[3]) / 2.0
                 )
-                updated_tracks[tid] = {
-                    'id': tid,
-                    'box': box,
-                    'center': center,
-                    'velocity': (0.0, 0.0),
-                    'lost_count': 0,
-                    'state': 'tracked',
-                    'confidence': det['confidence']
-                }
+                
+                # Check if we can re-associate with any lost track within 250px
+                best_lost_tid = None
+                best_dist = float('inf')
+                for tid, t in updated_tracks.items():
+                    if t.get('state') == 'lost':
+                        tc = t['center']
+                        dist = math.sqrt((center[0] - tc[0])**2 + (center[1] - tc[1])**2)
+                        if dist < 250.0 and dist < best_dist:
+                            best_dist = dist
+                            best_lost_tid = tid
+                            
+                if best_lost_tid is not None:
+                    tid = best_lost_tid
+                    updated_tracks[tid] = {
+                        'id': tid,
+                        'box': box,
+                        'center': center,
+                        'velocity': (0.0, 0.0),
+                        'lost_count': 0,
+                        'state': 'tracked',
+                        'confidence': det['confidence']
+                    }
+                elif self.next_id <= 24:
+                    tid = self.next_id
+                    self.next_id += 1
+                    updated_tracks[tid] = {
+                        'id': tid,
+                        'box': box,
+                        'center': center,
+                        'velocity': (0.0, 0.0),
+                        'lost_count': 0,
+                        'state': 'tracked',
+                        'confidence': det['confidence']
+                    }
+                else:
+                    # Recycle oldest/closest lost track to prevent ID explosion beyond 24
+                    lost_tids = [tid for tid, t in updated_tracks.items() if t.get('state') == 'lost']
+                    if lost_tids:
+                        closest_tid = min(lost_tids, key=lambda tid: math.sqrt((center[0] - updated_tracks[tid]['center'][0])**2 + (center[1] - updated_tracks[tid]['center'][1])**2))
+                        tid = closest_tid
+                        updated_tracks[tid] = {
+                            'id': tid,
+                            'box': box,
+                            'center': center,
+                            'velocity': (0.0, 0.0),
+                            'lost_count': 0,
+                            'state': 'tracked',
+                            'confidence': det['confidence']
+                        }
 
         self.tracks = updated_tracks
         # Return currently active tracks

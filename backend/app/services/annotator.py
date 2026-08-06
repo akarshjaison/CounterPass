@@ -36,8 +36,8 @@ def annotate_video(db: Session, job_id: int):
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 300
     
-    # Video Writer (Use VP9 for web compatibility)
-    fourcc = cv2.VideoWriter_fourcc(*'vp09')
+    # Video Writer (Use VP8 for much faster CPU encoding with web compatibility)
+    fourcc = cv2.VideoWriter_fourcc(*'vp80')
     writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
     
     if not writer.isOpened():
@@ -51,7 +51,7 @@ def annotate_video(db: Session, job_id: int):
 
     # Load tracks and team colors
     tracks = db.query(PlayerTrack).filter(PlayerTrack.job_id == job_id).all()
-    team_map = {t.track_id: t.team for t in tracks}
+    team_map: Dict[int, str] = {int(t.track_id): str(t.team) for t in tracks}  # type: ignore
     
     # Load all pass events
     passes = db.query(PassEvent).filter(PassEvent.job_id == job_id).all()
@@ -60,9 +60,10 @@ def annotate_video(db: Session, job_id: int):
     detections = db.query(PlayerDetection).filter(PlayerDetection.job_id == job_id).all()
     detections_by_frame: Dict[int, List[PlayerDetection]] = {}
     for d in detections:
-        if d.frame_index not in detections_by_frame:
-            detections_by_frame[d.frame_index] = []
-        detections_by_frame[d.frame_index].append(d)
+        f_idx = int(d.frame_index)  # type: ignore
+        if f_idx not in detections_by_frame:
+            detections_by_frame[f_idx] = []
+        detections_by_frame[f_idx].append(d)
         
     # Team Colors BGR mapping
     # Team A: Neon green
@@ -116,7 +117,7 @@ def annotate_video(db: Session, job_id: int):
         current_time = f / fps
         for p_ev in passes:
             # Estimate start and end frames from timestamps
-            start_frame = int(p_ev.timestamp * fps)
+            start_frame = int(p_ev.timestamp * fps)  # type: ignore
             # Duration approximation: completed pass takes ~1.2s, intercepted takes ~0.8s
             dur = 1.2 if p_ev.outcome == "completed" else 0.8
             end_frame = start_frame + int(dur * fps)
@@ -152,6 +153,11 @@ def annotate_video(db: Session, job_id: int):
 
         writer.write(frame)
         f += 1
+        
+        if f % 30 == 0:
+            job.progress = 90.0 + 9.0 * (f / max(1, frame_count))
+            job.current_stage = f"Rendering Video ({f}/{frame_count})"
+            db.commit()
         
     cap.release()
     writer.release()

@@ -1,6 +1,5 @@
 import os
-from pydantic import ConfigDict
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
 
 class Settings(BaseSettings):
@@ -38,7 +37,7 @@ class Settings(BaseSettings):
     WEIGHT_PRESSURE_RISK: float = 0.08
     WEIGHT_INTERCEPTION_RISK: float = 0.07
 
-    model_config = ConfigDict(case_sensitive=True)
+    model_config = SettingsConfigDict(case_sensitive=True)
 
 settings = Settings()
 

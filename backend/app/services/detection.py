@@ -42,7 +42,7 @@ def _ensure_yolo_weights(weights_path: str) -> None:
         )
 
 
-def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: str, downsample_fps: float = 5.0):
+def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: str, downsample_fps: float = 15.0):
     """
     Performs YOLOv8 frame inference using OpenCV's DNN module on a video file.
     Extracts person (class 0) and sports ball (class 32) detections.
@@ -71,9 +71,8 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
         if not ret:
             break
             
+        timestamp = f / fps
         if f % frame_interval == 0:
-            timestamp = f / fps
-            
             # Prepare standard 640x640 YOLO blob
             blob = cv2.dnn.blobFromImage(frame, 1/255.0, (640, 640), swapRB=True, crop=False)
             net.setInput(blob)
@@ -93,7 +92,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                     person_score = classes_scores[0]
                     ball_score = classes_scores[32] if len(classes_scores) > 32 else 0.0
                     
-                    if person_score > 0.4:
+                    if person_score > 0.35:
                         cx, cy, w, h = output[0, i], output[1, i], output[2, i], output[3, i]
                         x = int((cx - w/2) * (width / 640.0))
                         y = int((cy - h/2) * (height / 640.0))
@@ -118,7 +117,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                 
                 p_boxes = [boxes[idx] for idx in person_indices]
                 p_confs = [confidences[idx] for idx in person_indices]
-                nms_p = cv2.dnn.NMSBoxes(p_boxes, p_confs, 0.4, 0.5)
+                nms_p = cv2.dnn.NMSBoxes(p_boxes, p_confs, 0.35, 0.45)
                 
                 b_boxes = [boxes[idx] for idx in ball_indices]
                 b_confs = [confidences[idx] for idx in ball_indices]
@@ -204,6 +203,40 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                         confidence=tracked_ball['confidence'],
                         class_id=32
                     ))
+        else:
+            # Intermediate frame: interpolate/predict trajectories using trackers
+            tracked_players = tracker.update([])
+            for tp in tracked_players:
+                detections.append(PlayerDetection(
+                    job_id=job_id,
+                    frame_index=f,
+                    timestamp=timestamp,
+                    track_id=tp['id'],
+                    x_min=tp['box'][0],
+                    y_min=tp['box'][1],
+                    x_max=tp['box'][2],
+                    y_max=tp['box'][3],
+                    center_x=tp['center'][0],
+                    center_y=tp['center'][1],
+                    confidence=max(0.1, tp['confidence'] * 0.96),
+                    class_id=0
+                ))
+            tracked_ball = ball_tracker.update([])
+            if tracked_ball:
+                detections.append(PlayerDetection(
+                    job_id=job_id,
+                    frame_index=f,
+                    timestamp=timestamp,
+                    track_id=None,
+                    x_min=tracked_ball['box'][0],
+                    y_min=tracked_ball['box'][1],
+                    x_max=tracked_ball['box'][2],
+                    y_max=tracked_ball['box'][3],
+                    center_x=tracked_ball['center'][0],
+                    center_y=tracked_ball['center'][1],
+                    confidence=max(0.1, tracked_ball['confidence'] * 0.96),
+                    class_id=32
+                ))
         f += 1
         
     cap.release()
@@ -225,7 +258,22 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
         team_classifications = kmeans_classify(avg_track_colors)
         
         from app.models.models import PlayerTrack
+        
+        # Group track IDs by team and count detections
+        team_tracks = {}
         for tid, team in team_classifications.items():
+            track_dets = [d for d in detections if d.track_id == tid]
+            team_tracks.setdefault(team, []).append((tid, len(track_dets)))
+            
+        # Retain at most top 11 players per team (canonical squad of 22)
+        canonical_tids = set()
+        for team, tracks_list in team_tracks.items():
+            tracks_list.sort(key=lambda x: x[1], reverse=True)
+            for tid, _ in tracks_list[:11]:
+                canonical_tids.add(tid)
+
+        for tid in canonical_tids:
+            team = team_classifications[tid]
             track_dets = [d for d in detections if d.track_id == tid]
             avg_conf = sum(d.confidence for d in track_dets) / len(track_dets) if track_dets else 0.85
             db.add(PlayerTrack(

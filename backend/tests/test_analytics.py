@@ -61,7 +61,7 @@ def test_real_cv_analytics_pipeline():
     assert isinstance(events_data, list)
 
     # 7. Verify annotated output video placeholder or file is created on disk
-    annotated_filename = f"job_{job_id}_annotated.mp4"
+    annotated_filename = f"job_{job_id}_annotated.webm"
     annotated_path = os.path.join(settings.OUTPUT_DIR, annotated_filename)
     # Annotator creates a placeholder when the video cannot be opened
     assert os.path.exists(annotated_path)

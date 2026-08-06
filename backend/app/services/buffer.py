@@ -1,4 +1,5 @@
 from collections import deque
+from typing import Optional
 
 class TemporalFrameBuffer:
     def __init__(self, size: int = 60):
@@ -9,7 +10,7 @@ class TemporalFrameBuffer:
         self.size = size
         self.buffer = deque(maxlen=size)
 
-    def add_frame(self, frame_index: int, timestamp: float, player_detections: list, ball_detection: dict = None):
+    def add_frame(self, frame_index: int, timestamp: float, player_detections: list, ball_detection: Optional[dict] = None):
         """
         Adds a new frame's tracking data to the buffer.
         player_detections: list of dicts: {
