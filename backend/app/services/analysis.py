@@ -39,7 +39,7 @@ def _ensure_player_tracks(db: Session, job_id: int):
         ).group_by(PlayerDetection.track_id).all()
 
         if not unique_tracks:
-            unique_tracks = [(i, 0.85) for i in range(1, 6)] + [(i, 0.80) for i in range(12, 17)]
+            raise ValueError("No players detected — check video quality/framing")
 
         for track_id, avg_conf in unique_tracks:
             # Fallback if detection.py failed to cluster teams

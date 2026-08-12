@@ -28,14 +28,14 @@ class Settings(BaseSettings):
     TEMPORAL_BUFFER_SIZE: int = 60  # Number of frames to store in the sliding window buffer
     POSSESSION_DISTANCE_THRESHOLD: float = 100.0  # Pixels in frame coordinates or cm in pitch coordinates
     LANE_SAFETY_RADIUS: float = 25.0  # Danger radius for lane interception
+    BALL_CONFIDENCE_THRESHOLD: float = 0.25  # Confidence threshold for ball detections to cut false positives
     
     # Option Scoring Weights
     WEIGHT_LANE_CLEARANCE: float = 0.25
     WEIGHT_SPACE_SCORE: float = 0.20
     WEIGHT_PROGRESSION_VALUE: float = 0.25
     WEIGHT_MOVEMENT_SCORE: float = 0.15
-    WEIGHT_PRESSURE_RISK: float = 0.08
-    WEIGHT_INTERCEPTION_RISK: float = 0.07
+    WEIGHT_DISTANCE_SCORE: float = 0.15
 
     model_config = SettingsConfigDict(case_sensitive=True)
 

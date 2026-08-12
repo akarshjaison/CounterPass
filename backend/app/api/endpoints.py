@@ -127,7 +127,6 @@ def get_job_results(job_id: int, db: Session = Depends(get_db)):
     if job.status != "completed":
         raise HTTPException(status_code=400, detail=f"Job is not completed yet. Current status: {job.status}")
         
-    sanitize_job_data(db, job_id)
     metrics_dict = compile_match_metrics(db, job_id)
     return schemas.GeneralMetrics(**metrics_dict)
 
@@ -140,7 +139,6 @@ def get_pass_events(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    sanitize_job_data(db, job_id)
     events = db.query(PassEvent).filter(PassEvent.job_id == job_id).all()
     
     width = job.video.width or 1920
@@ -247,7 +245,6 @@ def get_players_list(job_id: int, db: Session = Depends(get_db)):
     """
     Returns tracked players classified by teams.
     """
-    sanitize_job_data(db, job_id)
     players = db.query(PlayerTrack).filter(PlayerTrack.job_id == job_id).all()
     return players
 
@@ -260,7 +257,6 @@ def get_full_metrics_details(job_id: int, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
         
-    sanitize_job_data(db, job_id)
     video = db.query(Video).filter(Video.id == job.video_id).first()
     
     # Generate timeline

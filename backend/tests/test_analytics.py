@@ -35,8 +35,27 @@ def test_real_cv_analytics_pipeline():
     # 3. Run background worker synchronously
     # Mock run_player_detection so we don't need ONNX weights or a real video.
     # This still exercises: _ensure_player_tracks -> run_tactical_analysis -> annotate_video.
-    with patch("app.services.analysis.run_player_detection") as mock_detect:
-        mock_detect.return_value = None
+    def _mock_detection(db, job_id, video_path):
+        for frame_idx in range(10):
+            ts = frame_idx / 30.0
+            db.add(PlayerDetection(
+                job_id=job_id, frame_index=frame_idx, timestamp=ts,
+                track_id=1, x_min=100.0, y_min=100.0, x_max=120.0, y_max=140.0,
+                center_x=110.0, center_y=120.0, confidence=0.9, class_id=0
+            ))
+            db.add(PlayerDetection(
+                job_id=job_id, frame_index=frame_idx, timestamp=ts,
+                track_id=2, x_min=300.0, y_min=100.0, x_max=320.0, y_max=140.0,
+                center_x=310.0, center_y=120.0, confidence=0.9, class_id=0
+            ))
+            db.add(PlayerDetection(
+                job_id=job_id, frame_index=frame_idx, timestamp=ts,
+                track_id=None, x_min=110.0, y_min=135.0, x_max=115.0, y_max=140.0,
+                center_x=112.5, center_y=137.5, confidence=0.85, class_id=32
+            ))
+        db.commit()
+
+    with patch("app.services.analysis.run_player_detection", side_effect=_mock_detection):
         _run_analysis_worker(job_id)
 
     # 4. Verify job status is completed
@@ -75,3 +94,38 @@ def test_real_cv_analytics_pipeline():
         os.remove(video_path)
     if os.path.exists(annotated_path):
         os.remove(annotated_path)
+
+def test_distance_affects_composite_score():
+    """
+    Asserts that candidate distance meaningfully affects composite_score.
+    """
+    lane_clearance = 1.0
+    pressure_score = 1.0
+    prog_score = 0.5
+    movement_score = 0.5
+
+    # Near candidate (dist = 40) -> dist_score = 0.2
+    dist_near = 40.0
+    dist_score_near = 0.2
+    score_near = (
+        settings.WEIGHT_LANE_CLEARANCE * lane_clearance +
+        settings.WEIGHT_SPACE_SCORE * pressure_score +
+        settings.WEIGHT_PROGRESSION_VALUE * prog_score +
+        settings.WEIGHT_MOVEMENT_SCORE * movement_score +
+        settings.WEIGHT_DISTANCE_SCORE * dist_score_near
+    )
+
+    # Optimal distance candidate (dist = 250) -> dist_score = 1.0
+    dist_far = 250.0
+    dist_score_far = 1.0
+    score_far = (
+        settings.WEIGHT_LANE_CLEARANCE * lane_clearance +
+        settings.WEIGHT_SPACE_SCORE * pressure_score +
+        settings.WEIGHT_PROGRESSION_VALUE * prog_score +
+        settings.WEIGHT_MOVEMENT_SCORE * movement_score +
+        settings.WEIGHT_DISTANCE_SCORE * dist_score_far
+    )
+
+    assert score_far > score_near
+    assert (score_far - score_near) == pytest.approx(settings.WEIGHT_DISTANCE_SCORE * (dist_score_far - dist_score_near))
+

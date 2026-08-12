@@ -145,6 +145,8 @@ class GeneralMetrics(BaseModel):
     awareness_rating: float
     positioning_rating: float
     movement_rating: float
+    low_confidence: bool = False
+    low_confidence_warning: Optional[str] = None
 
 class TimeSeriesInvolvement(BaseModel):
     timestamp: float

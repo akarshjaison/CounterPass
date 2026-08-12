@@ -147,30 +147,7 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
                     })
                     last_pass_timestamp = pass_ts
 
-    if not pass_events and sorted_frames:
-        # Fallback synthetic events spaced realistically across the match duration
-        total_frames = len(sorted_frames)
-        players_team_a = [tid for tid, t in team_map.items() if get_player_team(tid) == "Team A"]
-        players_team_b = [tid for tid, t in team_map.items() if get_player_team(tid) == "Team B"]
-        all_players = players_team_a + players_team_b
-        if len(all_players) >= 2:
-            fractions = [0.15, 0.38, 0.62, 0.85]
-            for idx_step, frac in enumerate(fractions):
-                idx_in_sorted = int(total_frames * frac)
-                evt_frame = sorted_frames[idx_in_sorted]
-                start_frame = sorted_frames[max(0, idx_in_sorted - 15)]
-                p1 = all_players[idx_step % len(all_players)]
-                p2 = all_players[(idx_step + 1) % len(all_players)]
-                outcome = "completed" if idx_step % 3 != 2 else "intercepted"
-                pass_events.append({
-                    'passer_track_id': p1,
-                    'receiver_track_id': p2,
-                    'start_frame': start_frame,
-                    'end_frame': evt_frame,
-                    'timestamp': round(evt_frame / fps, 1),
-                    'outcome': outcome,
-                    'confidence': 0.85
-                })
+
 
     # 7. Step 3: Option Analysis and Database Insertion
     for event_data in pass_events:
@@ -285,8 +262,7 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
                 settings.WEIGHT_SPACE_SCORE * pressure_score +
                 settings.WEIGHT_PROGRESSION_VALUE * prog_score +
                 settings.WEIGHT_MOVEMENT_SCORE * movement_score +
-                settings.WEIGHT_PRESSURE_RISK * pressure_score +
-                settings.WEIGHT_INTERCEPTION_RISK * lane_clearance
+                settings.WEIGHT_DISTANCE_SCORE * dist_score
             )
             composite_score = min(1.0, max(0.0, composite_score))
             
@@ -451,35 +427,80 @@ def compile_match_metrics(db: Session, job_id: int) -> Dict[str, Any]:
     # Positioning rating based on pressure values (open space finding)
     positioning = 75.0 + 10.0 * avg_opt
     
-    # Movement rating based on average velocity vectors (mocked or average speed)
-    movement = 80.0
+    # Movement rating based on aggregate player speed across consecutive frames
+    all_dets = db.query(PlayerDetection).filter(
+        PlayerDetection.job_id == job_id,
+        PlayerDetection.track_id.isnot(None),
+        PlayerDetection.class_id == 0
+    ).order_by(PlayerDetection.track_id, PlayerDetection.frame_index).all()
+
+    track_speeds = []
+    prev_d = None
+    for d in all_dets:
+        if prev_d and prev_d.track_id == d.track_id and d.frame_index == prev_d.frame_index + 1:
+            dt = (d.timestamp - prev_d.timestamp) or (1.0 / 30.0)
+            dist = math.sqrt((d.center_x - prev_d.center_x)**2 + (d.center_y - prev_d.center_y)**2)
+            speed = dist / dt
+            track_speeds.append(speed)
+        prev_d = d
+
+    if track_speeds:
+        avg_speed = sum(track_speeds) / len(track_speeds)
+        movement = round(min(100.0, max(20.0, (avg_speed / 150.0) * 100.0)), 1)
+    else:
+        movement = 80.0
     
     # Composite CounterPass score
     counterpass_score = 0.4 * rate + 0.4 * decision_making + 0.2 * awareness
     counterpass_score = min(100.0, max(0.0, counterpass_score))
     
-    # Count forward passes (progression > 0)
+    # Count forward passes (progression > 0) via geometric x-position check
     forward_passes = 0
     risky_passes = 0
     for p in passes:
-        # Determine if forward/risky
         if p.outcome == "intercepted" or (p.confidence < 0.75):
             risky_passes += 1
-        # Simple heuristic
-        if p.receiver_track_id > p.passer_track_id:
+            
+        passer_det = db.query(PlayerDetection).filter(
+            PlayerDetection.job_id == job_id,
+            PlayerDetection.track_id == p.passer_track_id,
+            PlayerDetection.timestamp <= p.timestamp
+        ).order_by(PlayerDetection.timestamp.desc()).first()
+
+        receiver_det = db.query(PlayerDetection).filter(
+            PlayerDetection.job_id == job_id,
+            PlayerDetection.track_id == p.receiver_track_id,
+            PlayerDetection.timestamp <= p.timestamp + 3.0
+        ).order_by(PlayerDetection.timestamp.desc()).first()
+
+        if passer_det and receiver_det:
+            passer_track = db.query(PlayerTrack).filter(PlayerTrack.job_id == job_id, PlayerTrack.track_id == p.passer_track_id).first()
+            team = passer_track.team if passer_track else "Team A"
+            if team == "Team B":
+                if receiver_det.center_x < passer_det.center_x:
+                    forward_passes += 1
+            else:
+                if receiver_det.center_x > passer_det.center_x:
+                    forward_passes += 1
+        elif p.receiver_track_id != p.passer_track_id:
             forward_passes += 1
+            
+    low_confidence = total_p < 2
+    low_confidence_warning = "Low confidence: Results are based on very few detections/passes. This may not be an accurate representation." if low_confidence else None
             
     return {
         "total_passes": total_p,
         "completed_passes": completed_p,
         "completion_rate": rate,
         "missed_opportunities_count": len(missed),
-        "forward_passes": max(1, forward_passes),
+        "forward_passes": forward_passes,
         "risky_passes": risky_passes,
         "avg_option_score": avg_opt,
         "counterpass_score": round(counterpass_score, 1),
         "decision_making_rating": round(decision_making, 1),
         "awareness_rating": round(awareness, 1),
         "positioning_rating": round(positioning, 1),
-        "movement_rating": movement
+        "movement_rating": movement,
+        "low_confidence": low_confidence,
+        "low_confidence_warning": low_confidence_warning
     }

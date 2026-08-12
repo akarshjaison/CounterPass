@@ -588,6 +588,16 @@ export default function App() {
               </div>
             </div>
 
+            {metrics.low_confidence && (
+              <div className="p-4 bg-sports-warning/10 border border-sports-warning/20 rounded-xl text-sports-warning text-sm flex gap-3 items-center w-full">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <div>
+                  <h4 className="font-bold">Low Confidence Warning</h4>
+                  <p className="text-slate-400 text-xs mt-1">{metrics.low_confidence_warning || "Results are based on very few detections/passes. This may not be an accurate representation."}</p>
+                </div>
+              </div>
+            )}
+
             {/* ANNOTATED VIDEO PREVIEW */}
             <div className="glass-card p-4 flex flex-col gap-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">

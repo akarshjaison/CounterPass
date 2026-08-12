@@ -41,8 +41,8 @@ class PlayerTrack(Base):
     __tablename__ = "player_tracks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False)
-    track_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False, index=True)
+    track_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     team: Mapped[Optional[str]] = mapped_column(String, default="Unknown")
     confidence: Mapped[Optional[float]] = mapped_column(Float, default=1.0)
 
@@ -52,7 +52,7 @@ class PassEvent(Base):
     __tablename__ = "pass_events"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False, index=True)
     passer_track_id: Mapped[int] = mapped_column(Integer, nullable=False)
     receiver_track_id: Mapped[int] = mapped_column(Integer, nullable=False)
     timestamp: Mapped[float] = mapped_column(Float, nullable=False)
@@ -66,7 +66,7 @@ class PassingOption(Base):
     __tablename__ = "passing_options"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    pass_event_id: Mapped[int] = mapped_column(Integer, ForeignKey("pass_events.id"), nullable=False)
+    pass_event_id: Mapped[int] = mapped_column(Integer, ForeignKey("pass_events.id"), nullable=False, index=True)
     candidate_track_id: Mapped[int] = mapped_column(Integer, nullable=False)
     source: Mapped[Optional[str]] = mapped_column(String, default="observed")
     score: Mapped[Optional[float]] = mapped_column(Float, default=0.0)
@@ -79,7 +79,7 @@ class MissedOpportunity(Base):
     __tablename__ = "missed_opportunities"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False, index=True)
     timestamp: Mapped[float] = mapped_column(Float, nullable=False)
     carrier_track_id: Mapped[int] = mapped_column(Integer, nullable=False)
     recommended_track_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -93,10 +93,10 @@ class PlayerDetection(Base):
     __tablename__ = "player_detections"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("analysis_jobs.id"), nullable=False, index=True)
     frame_index: Mapped[int] = mapped_column(Integer, nullable=False)
     timestamp: Mapped[float] = mapped_column(Float, nullable=False)
-    track_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    track_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     x_min: Mapped[float] = mapped_column(Float, nullable=False)
     y_min: Mapped[float] = mapped_column(Float, nullable=False)
     x_max: Mapped[float] = mapped_column(Float, nullable=False)

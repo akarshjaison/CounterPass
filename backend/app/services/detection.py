@@ -101,7 +101,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                         boxes.append([x, y, w, h])
                         confidences.append(float(person_score))
                         class_ids.append(0)
-                    elif ball_score > 0.1:
+                    elif ball_score > settings.BALL_CONFIDENCE_THRESHOLD:
                         cx, cy, w, h = output[0, i], output[1, i], output[2, i], output[3, i]
                         x = int((cx - w/2) * (width / 640.0))
                         y = int((cy - h/2) * (height / 640.0))
@@ -121,7 +121,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                 
                 b_boxes = [boxes[idx] for idx in ball_indices]
                 b_confs = [confidences[idx] for idx in ball_indices]
-                nms_b = cv2.dnn.NMSBoxes(b_boxes, b_confs, 0.1, 0.5)
+                nms_b = cv2.dnn.NMSBoxes(b_boxes, b_confs, settings.BALL_CONFIDENCE_THRESHOLD, 0.5)
                 
                 tracker_inputs = []
                 for idx in nms_p:
@@ -259,10 +259,16 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
         
         from app.models.models import PlayerTrack
         
+        # Group detections by track_id in a single pass O(N)
+        dets_by_track: Dict[int, List[PlayerDetection]] = {}
+        for d in detections:
+            if d.track_id is not None:
+                dets_by_track.setdefault(d.track_id, []).append(d)
+
         # Group track IDs by team and count detections
         team_tracks = {}
         for tid, team in team_classifications.items():
-            track_dets = [d for d in detections if d.track_id == tid]
+            track_dets = dets_by_track.get(tid, [])
             team_tracks.setdefault(team, []).append((tid, len(track_dets)))
             
         # Retain at most top 11 players per team (canonical squad of 22)
@@ -274,7 +280,7 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
 
         for tid in canonical_tids:
             team = team_classifications[tid]
-            track_dets = [d for d in detections if d.track_id == tid]
+            track_dets = dets_by_track.get(tid, [])
             avg_conf = sum(d.confidence for d in track_dets) / len(track_dets) if track_dets else 0.85
             db.add(PlayerTrack(
                 job_id=job_id,

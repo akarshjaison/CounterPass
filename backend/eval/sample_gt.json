@@ -1,0 +1,28 @@
+{
+  "predicted_passes": [
+    {"timestamp": 5.2, "passer_track_id": 1, "receiver_track_id": 2},
+    {"timestamp": 12.8, "passer_track_id": 2, "receiver_track_id": 3}
+  ],
+  "ground_truth_passes": [
+    {"timestamp": 5.0, "passer_track_id": 1, "receiver_track_id": 2},
+    {"timestamp": 13.0, "passer_track_id": 2, "receiver_track_id": 3}
+  ],
+  "predicted_positions": [
+    [10.0, 20.0],
+    [15.5, 25.0]
+  ],
+  "ground_truth_positions": [
+    [10.2, 20.1],
+    [15.0, 25.2]
+  ],
+  "predicted_teams": {
+    "1": "Team A",
+    "2": "Team A",
+    "12": "Team B"
+  },
+  "ground_truth_teams": {
+    "1": "Team A",
+    "2": "Team A",
+    "12": "Team B"
+  }
+}

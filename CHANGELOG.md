@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0] - 2026-08-12 - Core Refactor & System Fixes (Groups 1-7)
+### Changed & Fixed
+- **Fabricated Data Removal**: Removed all synthetic fallback pass events and hardcoded player track fallbacks. Jobs with 0 player detections fail gracefully with `"No players detected"` error status.
+- **Scoring & Interception Risk**: Added `dist_score` to composite option score formula, rebalanced weights to sum to 1.0, and replaced duplicate terms with a real physics-based interception safety calculation.
+- **Geometric Metrics**: Replaced arbitrary track_id comparisons in `forward_passes` with geometric x-position checks relative to team attack directions. Replaced hardcoded `movement_rating` with calculated average speed across tracked frames.
+- **Pitch Calibration**: Added `calibration.py` for 4-point homography matrix calculation ($105\text{m} \times 68\text{m}$ pitch space) and dynamic team attack direction inference.
+- **Detection Quality**: Raised ball detection confidence threshold to `0.25` via named config constant and added pre-grouped dictionary lookups in detection tracking.
+- **Ground-Truth Eval Harness**: Created `backend/eval/eval_harness.py` for precision/recall, position error (MAE/RMSE), and team accuracy evaluation against ground-truth datasets.
+- **Performance & Read-Only Endpoints**: Added database indexes on `job_id`, `track_id`, and `pass_event_id` in `models.py`. Removed data mutation calls from `GET` endpoints to make them read-only.
+
 ## [1.1.0] - 2026-07-11 - Phase 2: Player Detection
 ### Added
 - Database model schema for frame-by-frame `PlayerDetection` (storing bounding boxes, centers, and confidences).

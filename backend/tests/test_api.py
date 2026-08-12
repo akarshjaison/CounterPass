@@ -8,6 +8,7 @@ from app.main import app
 from app.core.config import settings
 from app.services.analysis import _run_analysis_worker
 from app.db.database import SessionLocal
+from app.models.models import PlayerDetection
 
 client = TestClient(app)
 
@@ -75,10 +76,19 @@ def test_analysis_pipeline_and_detections():
     job_id = job_data["id"]
 
     # 3. Execute background worker synchronously (mock detection to avoid ONNX download)
+    def _mock_detection(db, job_id, video_path):
+        for frame_idx in range(5):
+            ts = frame_idx / 30.0
+            db.add(PlayerDetection(
+                job_id=job_id, frame_index=frame_idx, timestamp=ts,
+                track_id=1, x_min=100.0, y_min=100.0, x_max=120.0, y_max=140.0,
+                center_x=110.0, center_y=120.0, confidence=0.9, class_id=0
+            ))
+        db.commit()
+
     db = SessionLocal()
     try:
-        with patch("app.services.analysis.run_player_detection") as mock_detect:
-            mock_detect.return_value = None  # No-op: pretend detection ran
+        with patch("app.services.analysis.run_player_detection", side_effect=_mock_detection):
             _run_analysis_worker(job_id)
     finally:
         db.close()
@@ -93,8 +103,9 @@ def test_analysis_pipeline_and_detections():
     assert det_res.status_code == 200
     detections = det_res.json()
     
-    # With mocked detection, we expect an empty list (no real detections)
+    # We expect populated detections list
     assert isinstance(detections, list)
+    assert len(detections) > 0
 
     # Cleanup video from disk
     if video_path and os.path.exists(video_path):
