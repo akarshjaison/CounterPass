@@ -73,6 +73,10 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
 
     # 5. Step 1: Possession Estimation
     # frame_index -> carrier_track_id (or None)
+    # Possession radius is derived from the average player bounding-box height in
+    # each frame (rather than a fixed pixel constant) so it adapts to camera
+    # zoom/resolution: a "body-length" proximity check means roughly the same
+    # real-world distance whether the pitch fills the frame or is shot wide.
     possession_history: Dict[int, Optional[int]] = {}
     for frame_idx in sorted_frames:
         frame_dets = frames_map[frame_idx]
@@ -91,16 +95,47 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
                 if dist < min_dist:
                     min_dist = dist
                     closest_player = p
-            
-            # Check proximity threshold
-            if min_dist < settings.POSSESSION_DISTANCE_THRESHOLD:
+
+            avg_height = sum((p.y_max - p.y_min) for p in players) / len(players)
+            possession_radius = max(
+                settings.POSSESSION_DISTANCE_THRESHOLD,
+                settings.POSSESSION_RADIUS_SCALE * avg_height
+            )
+
+            if min_dist < possession_radius:
                 if closest_player:
                     carrier = closest_player.track_id
                     
         possession_history[frame_idx] = carrier
 
+    # 5b. Smooth brief ball-detection dropouts: if the carrier is unknown (ball not
+    # detected/matched) for only a short run and the same player holds possession
+    # immediately before and after that run, treat it as one continuous possession
+    # rather than letting a flaky ball detector fragment it below the minimum
+    # possession length and silently erase a real pass.
+    gap_tolerance_frames = max(2, round(settings.POSSESSION_GAP_TOLERANCE_SEC * fps))
+    i = 0
+    n = len(sorted_frames)
+    while i < n:
+        f = sorted_frames[i]
+        if possession_history[f] is None:
+            j = i
+            while j < n and possession_history[sorted_frames[j]] is None:
+                j += 1
+            gap_len = j - i
+            before = possession_history[sorted_frames[i - 1]] if i > 0 else None
+            after = possession_history[sorted_frames[j]] if j < n else None
+            if gap_len <= gap_tolerance_frames and before is not None and before == after:
+                for k in range(i, j):
+                    possession_history[sorted_frames[k]] = before
+            i = j
+        else:
+            i += 1
+
     # 6. Step 2: Pass Event Detection with possession debouncing
-    # Require at least 5 frames of possession to avoid single-frame touch jitter
+    # Require a minimum span of possession (scaled to fps rather than a fixed
+    # frame count) to avoid single-frame touch jitter registering as a "carry".
+    min_possession_frames = max(2, round(settings.MIN_POSSESSION_SEC * fps))
     possession_segments: List[Tuple[int, int, int]] = []
     current_carrier = None
     start_f = None
@@ -108,7 +143,7 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
     for idx, f in enumerate(sorted_frames):
         carrier = possession_history[f]
         if carrier != current_carrier:
-            if current_carrier is not None and start_f is not None and (f - start_f) >= 5:
+            if current_carrier is not None and start_f is not None and (f - start_f) >= min_possession_frames:
                 possession_segments.append((current_carrier, start_f, sorted_frames[idx - 1]))
             current_carrier = carrier
             start_f = f

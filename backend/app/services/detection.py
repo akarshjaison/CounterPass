@@ -1,9 +1,60 @@
 import os
+import math
 import cv2
 import numpy as np
+from typing import Dict, List
 from sqlalchemy.orm import Session
 from app.models.models import PlayerDetection
 from app.core.config import settings
+
+
+def _track_avg_speed(track_dets: List[PlayerDetection]) -> float:
+    """
+    Average frame-to-frame center displacement speed (pixels/sec) for a track.
+    Used to distinguish players (who move continuously) from largely-stationary
+    sideline staff/cameramen picked up by the generic person detector.
+    """
+    ordered = sorted(track_dets, key=lambda d: d.timestamp)
+    speeds = []
+    for i in range(1, len(ordered)):
+        dt = ordered[i].timestamp - ordered[i - 1].timestamp
+        if dt <= 0:
+            continue
+        dx = ordered[i].center_x - ordered[i - 1].center_x
+        dy = ordered[i].center_y - ordered[i - 1].center_y
+        speeds.append(math.sqrt(dx * dx + dy * dy) / dt)
+    return sum(speeds) / len(speeds) if speeds else 0.0
+
+
+def _identify_static_tracks(dets_by_track: Dict[int, List[PlayerDetection]]) -> set:
+    """
+    Flags tracks that are very unlikely to be players: cameramen, sideline staff,
+    ball boys, or a stray non-pitch person picked up by the generic COCO 'person'
+    class. Real players move continuously (jogging/sprinting) over the course of
+    a match; someone standing on the touchline mostly doesn't.
+
+    This uses a threshold *relative to the video's own median player speed*
+    (not a fixed pixel value) so it adapts to camera zoom/resolution, and only
+    acts on tracks with enough samples to make the call reliably.
+    """
+    MIN_SAMPLES = 20
+    speeds = {tid: _track_avg_speed(dets) for tid, dets in dets_by_track.items()}
+    eligible_speeds = [s for tid, s in speeds.items() if len(dets_by_track[tid]) >= MIN_SAMPLES]
+    if not eligible_speeds:
+        return set()
+
+    sorted_speeds = sorted(eligible_speeds)
+    median_speed = sorted_speeds[len(sorted_speeds) // 2]
+    if median_speed <= 0:
+        return set()
+
+    static_ids = set()
+    for tid, dets in dets_by_track.items():
+        if len(dets) < MIN_SAMPLES:
+            continue
+        if speeds[tid] < 0.15 * median_speed:
+            static_ids.add(tid)
+    return static_ids
 
 PT_WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "yolov8n.pt")
 
@@ -123,6 +174,8 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                 b_confs = [confidences[idx] for idx in ball_indices]
                 nms_b = cv2.dnn.NMSBoxes(b_boxes, b_confs, settings.BALL_CONFIDENCE_THRESHOLD, 0.5)
                 
+                from app.services.classifier import extract_jersey_color
+
                 tracker_inputs = []
                 for idx in nms_p:
                     # nms_p may return array or list depending on opencv version
@@ -136,9 +189,14 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                     x_max = min(float(width), float(box[0] + box[2]))
                     y_max = min(float(height), float(box[1] + box[3]))
                     
+                    # Compute jersey color up front so the tracker can use it as an
+                    # appearance cue during identity matching (not just after the fact).
+                    color = extract_jersey_color(frame, [x_min, y_min, x_max, y_max])
+                    
                     tracker_inputs.append({
                         'box': [x_min, y_min, x_max, y_max],
-                        'confidence': conf
+                        'confidence': conf,
+                        'color': color
                     })
                 
                 # Update tracker with detections
@@ -161,13 +219,12 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
                         class_id=0
                     ))
                     
-                    # Extract jersey color for the chest crop
-                    from app.services.classifier import extract_jersey_color
-                    color = extract_jersey_color(frame, tp['box'])
                     tid = tp['id']
-                    if tid not in track_colors:
-                        track_colors[tid] = []
-                    track_colors[tid].append(color)
+                    color = tp.get('avg_color')
+                    if color is not None:
+                        if tid not in track_colors:
+                            track_colors[tid] = []
+                        track_colors[tid].append(color)
                     
                 # Process ball detections through BallTracker
                 ball_inputs = []
@@ -246,24 +303,31 @@ def run_yolo_detection(db: Session, job_id: int, video_path: str, weights_path: 
     
     # Calculate average color per track_id and run team clustering
     if track_colors:
-        avg_track_colors = {}
-        for tid, colors in track_colors.items():
-            if colors:
-                r_avg = sum(c[0] for c in colors) / len(colors)
-                g_avg = sum(c[1] for c in colors) / len(colors)
-                b_avg = sum(c[2] for c in colors) / len(colors)
-                avg_track_colors[tid] = [r_avg, g_avg, b_avg]
-                
-        from app.services.classifier import kmeans_classify
-        team_classifications = kmeans_classify(avg_track_colors)
-        
         from app.models.models import PlayerTrack
-        
+
         # Group detections by track_id in a single pass O(N)
         dets_by_track: Dict[int, List[PlayerDetection]] = {}
         for d in detections:
             if d.track_id is not None:
                 dets_by_track.setdefault(d.track_id, []).append(d)
+
+        # Exclude tracks that barely move over a long span — most likely
+        # cameramen/sideline staff, not players — *before* they can influence
+        # team-color clustering or occupy a "top 11" canonical squad slot.
+        static_tids = _identify_static_tracks(dets_by_track)
+
+        avg_track_colors = {}
+        for tid, colors in track_colors.items():
+            if tid in static_tids:
+                continue
+            if colors:
+                r_avg = sum(c[0] for c in colors) / len(colors)
+                g_avg = sum(c[1] for c in colors) / len(colors)
+                b_avg = sum(c[2] for c in colors) / len(colors)
+                avg_track_colors[tid] = [r_avg, g_avg, b_avg]
+
+        from app.services.classifier import kmeans_classify
+        team_classifications = kmeans_classify(avg_track_colors)
 
         # Group track IDs by team and count detections
         team_tracks = {}

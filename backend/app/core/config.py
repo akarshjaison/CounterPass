@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     DECAY_LAMBDA: float = 0.5  # Confidence decay parameter for temporally inferred options (confidence = orig * exp(-lambda * time))
     MAX_LOST_FRAMES: int = 30  # Number of frames to retain lost tracks
     TEMPORAL_BUFFER_SIZE: int = 60  # Number of frames to store in the sliding window buffer
-    POSSESSION_DISTANCE_THRESHOLD: float = 100.0  # Pixels in frame coordinates or cm in pitch coordinates
+    POSSESSION_DISTANCE_THRESHOLD: float = 100.0  # Floor value (px) used when few/no players are visible in a frame
+    POSSESSION_RADIUS_SCALE: float = 0.9  # Possession radius = this * avg. player bbox height in the frame (scale-adaptive)
+    POSSESSION_GAP_TOLERANCE_SEC: float = 0.3  # Bridge ball-detection dropouts up to this long if the same player holds possession on both sides
+    MIN_POSSESSION_SEC: float = 0.15  # Minimum continuous possession duration to count as a real "carry" (fps-relative, replaces old fixed 5-frame rule)
     LANE_SAFETY_RADIUS: float = 25.0  # Danger radius for lane interception
     BALL_CONFIDENCE_THRESHOLD: float = 0.25  # Confidence threshold for ball detections to cut false positives
     
