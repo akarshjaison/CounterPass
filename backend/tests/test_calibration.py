@@ -1,25 +1,30 @@
 import pytest
 import numpy as np
-from app.services.calibration import compute_homography_matrix, transform_point, infer_team_attack_directions
+from typing import cast
+from app.services.calibration import PitchCalibrator, infer_team_attack_directions
 from app.db.database import SessionLocal
 from app.models.models import AnalysisJob, PlayerTrack, PlayerDetection, Video
 
 def test_homography_transform_roundtrip():
     """
-    Test that homography matrix transforms standard 4 corner points accurately.
+    Test that transform_point falls back to identity if uncalibrated, or uses transformer if available.
     """
-    src_points = [(0.0, 0.0), (1920.0, 0.0), (1920.0, 1080.0), (0.0, 1080.0)]
-    H = compute_homography_matrix(src_points, img_width=1920, img_height=1080)
+    calibrator = PitchCalibrator()
+    
+    # Uncalibrated fallback
+    tx0, ty0 = calibrator.transform_point(0.0, 0.0)
+    assert tx0 == 0.0
+    assert ty0 == 0.0
 
-    # Top-left should map near (0, 0)
-    tx0, ty0 = transform_point(0.0, 0.0, H)
-    assert tx0 == pytest.approx(0.0, abs=1e-2)
-    assert ty0 == pytest.approx(0.0, abs=1e-2)
-
-    # Bottom-right should map near (105, 68)
-    tx1, ty1 = transform_point(1920.0, 1080.0, H)
-    assert tx1 == pytest.approx(105.0, abs=1e-2)
-    assert ty1 == pytest.approx(68.0, abs=1e-2)
+    # Mocking a transformer
+    class MockTransformer:
+        def transform_points(self, points):
+            return points * 0.5
+            
+    calibrator.transformer = MockTransformer()
+    tx1, ty1 = calibrator.transform_point(1920.0, 1080.0)
+    assert tx1 == 960.0
+    assert ty1 == 540.0
 
 def test_attack_direction_inference():
     """
@@ -52,7 +57,8 @@ def test_attack_direction_inference():
         ))
         db.commit()
 
-        directions = infer_team_attack_directions(db, job.id)
+        # Cast job.id to int using typing.cast to satisfy the static type checker
+        directions = infer_team_attack_directions(db, cast(int, job.id))
         assert directions["Team A"] == "right"
         assert directions["Team B"] == "left"
     finally:

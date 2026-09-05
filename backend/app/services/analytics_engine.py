@@ -5,7 +5,7 @@ from app.models.models import PlayerDetection, PlayerTrack, PassEvent, PassingOp
 from app.core.config import settings
 from app.services.buffer import TemporalFrameBuffer
 
-def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, height: int):
+def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, height: int, calibrator=None):
     """
     Main entry point for running the spatio-temporal tactical analysis.
     Reads player and ball detections, reconstructs play, and populates
@@ -27,6 +27,8 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
     sorted_frames = sorted(frames_map.keys())
     if len(sorted_frames) < 5:
         return
+        
+    is_metric = calibrator is not None and calibrator.transformer is not None
 
     # 3. Populate Temporal Frame Buffer
     buffer = TemporalFrameBuffer(size=settings.TEMPORAL_BUFFER_SIZE)
@@ -38,17 +40,22 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
         ball_det = None
         
         for d in frame_dets:
+            cx, cy = d.center_x, d.center_y
+            if is_metric:
+                cx, cy = calibrator.transform_point(cx, cy)
+                # Note: box coordinates are left as pixels since they are used for height approximations
+                
             if d.class_id == 32:  # Ball
                 ball_det = {
                     'box': [d.x_min, d.y_min, d.x_max, d.y_max],
-                    'center': (d.center_x, d.center_y),
+                    'center': (cx, cy),
                     'confidence': d.confidence
                 }
             elif d.class_id == 0 and d.track_id is not None:  # Tracked player
                 player_list.append({
                     'track_id': d.track_id,
                     'box': [d.x_min, d.y_min, d.x_max, d.y_max],
-                    'center': (d.center_x, d.center_y),
+                    'center': (cx, cy),
                     'confidence': d.confidence
                 })
         
@@ -215,6 +222,21 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
         best_option_tid = None
         selected_option_score = 0.0
         
+        # Metric thresholds (in meters if is_metric else pixels)
+        DIST_GOOD = 5.0 if is_metric else 50.0
+        DIST_OK = 15.0 if is_metric else 150.0
+        DIST_MAX = 50.0 if is_metric else 500.0
+        PROG_MAX = 30.0 if is_metric else 300.0
+        PRESS_MAX = 15.0 if is_metric else 150.0
+        CLEAR_MAX = 8.0 if is_metric else 80.0
+        SPEED_MAX = 8.0 if is_metric else 5.0
+        
+        def get_pt(det):
+            cx, cy = det.center_x, det.center_y
+            return calibrator.transform_point(cx, cy) if is_metric else (cx, cy)
+            
+        pcx, pcy = get_pt(passer_det)
+        
         # Save PassEvent first to get an ID
         db_pass = PassEvent(
             job_id=job_id,
@@ -233,63 +255,70 @@ def run_tactical_analysis(db: Session, job_id: int, fps: float, width: int, heig
             cand_id = cand.track_id
             
             # A. Distance
-            dx = cand.center_x - passer_det.center_x
-            dy = cand.center_y - passer_det.center_y
+            ccx, ccy = get_pt(cand)
+            dx = ccx - pcx
+            dy = ccy - pcy
             dist = math.sqrt(dx**2 + dy**2)
             
-            if dist < 50.0:
+            if dist < DIST_GOOD:
                 dist_score = 0.2
-            elif dist < 150.0:
-                dist_score = 0.2 + 0.8 * (dist - 50.0) / 100.0
-            elif dist <= 500.0:
+            elif dist < DIST_OK:
+                dist_score = 0.2 + 0.8 * (dist - DIST_GOOD) / (DIST_OK - DIST_GOOD)
+            elif dist <= DIST_MAX:
                 dist_score = 1.0
             else:
-                dist_score = max(0.1, 1.0 - (dist - 500.0) / 500.0)
+                dist_score = max(0.1, 1.0 - (dist - DIST_MAX) / DIST_MAX)
                 
             # B. Goal Progression Value
             # Team A attacks to the right (+x), Team B attacks to the left (-x)
             if passer_team == "Team A":
-                progression = cand.center_x - passer_det.center_x
+                progression = ccx - pcx
             else:
-                progression = passer_det.center_x - cand.center_x
+                progression = pcx - ccx
                 
             if progression > 0:
-                prog_score = min(1.0, 0.5 + 0.5 * (progression / 300.0))
+                prog_score = min(1.0, 0.5 + 0.5 * (progression / PROG_MAX))
             else:
-                prog_score = max(0.1, 0.5 + 0.4 * (progression / 300.0))
+                prog_score = max(0.1, 0.5 + 0.4 * (progression / PROG_MAX))
                 
             # C. Defensive Pressure Risk
             pressure_score = 1.0
             if opponents:
-                closest_opp_dist = min(
-                    math.sqrt((cand.center_x - opp.center_x)**2 + (cand.center_y - opp.center_y)**2)
-                    for opp in opponents
-                )
-                pressure_score = min(1.0, closest_opp_dist / 150.0)
+                closest_opp_dist = float('inf')
+                for opp in opponents:
+                    ocx, ocy = get_pt(opp)
+                    odist = math.sqrt((ccx - ocx)**2 + (ccy - ocy)**2)
+                    if odist < closest_opp_dist:
+                        closest_opp_dist = odist
+                pressure_score = min(1.0, closest_opp_dist / PRESS_MAX)
                 
             # D. Passing Lane Clearance
             lane_clearance = 1.0
             if dist > 0:
                 for opp in opponents:
+                    ocx, ocy = get_pt(opp)
                     # Vector from passer to opponent
-                    dx_opp = opp.center_x - passer_det.center_x
-                    dy_opp = opp.center_y - passer_det.center_y
+                    dx_opp = ocx - pcx
+                    dy_opp = ocy - pcy
                     
                     # Project opponent onto passing segment
                     t = (dx_opp * dx + dy_opp * dy) / (dist**2)
                     if 0.0 < t < 1.0:
-                        proj_x = passer_det.center_x + t * dx
-                        proj_y = passer_det.center_y + t * dy
-                        perp_dist = math.sqrt((opp.center_x - proj_x)**2 + (opp.center_y - proj_y)**2)
+                        proj_x = pcx + t * dx
+                        proj_y = pcy + t * dy
+                        perp_dist = math.sqrt((ocx - proj_x)**2 + (ocy - proj_y)**2)
                         
-                        clearance = min(1.0, perp_dist / 80.0)
+                        clearance = min(1.0, perp_dist / CLEAR_MAX)
                         if clearance < lane_clearance:
                             lane_clearance = clearance
                             
             # E. Movement / Speed Score
             vx, vy = buffer.get_average_velocity(cand_id, num_frames=5)
+            # if is_metric, vx and vy are in meters per second (since timestamps are used in buffer)
+            # wait, buffer uses timestamps, so speed is units/sec.
+            # In pixels: ~150px/sec is full sprint. In meters: ~8m/s is full sprint.
             speed = math.sqrt(vx**2 + vy**2)
-            movement_score = min(1.0, 0.5 + 0.5 * (speed / 5.0))
+            movement_score = min(1.0, 0.5 + 0.5 * (speed / (SPEED_MAX * (1 if is_metric else 30.0))))
             
             # F. Composite Option Score
             composite_score = (
@@ -473,8 +502,9 @@ def compile_match_metrics(db: Session, job_id: int) -> Dict[str, Any]:
     prev_d = None
     for d in all_dets:
         if prev_d and prev_d.track_id == d.track_id and d.frame_index == prev_d.frame_index + 1:
-            dt = (d.timestamp - prev_d.timestamp) or (1.0 / 30.0)
-            dist = math.sqrt((d.center_x - prev_d.center_x)**2 + (d.center_y - prev_d.center_y)**2)
+            # Use # type: ignore to satisfy the static type checker without cluttering the code with casts
+            dt = (d.timestamp - prev_d.timestamp) or (1.0 / 30.0)  # type: ignore
+            dist = math.sqrt((d.center_x - prev_d.center_x)**2 + (d.center_y - prev_d.center_y)**2)  # type: ignore
             speed = dist / dt
             track_speeds.append(speed)
         prev_d = d
