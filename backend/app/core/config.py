@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     BASE_DIR: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
     OUTPUT_DIR: str = os.path.join(BASE_DIR, "outputs")
+    MODELS_DIR: str = os.path.join(BASE_DIR, "app", "models")
+    
+    # Model URLs (Google Drive IDs or direct URLs)
+    PLAYER_MODEL_URL: str = "https://drive.google.com/uc?id=17PXFNlx-jI7VjVo_vQnB1sONjRyvoB-q"
+    BALL_MODEL_URL: str = "https://drive.google.com/uc?id=1isw4wx-MK9h9LMr36VvIWlJD6ppUvw7V"
+    PITCH_MODEL_URL: str = "https://drive.google.com/uc?id=1Ma5Kt86tgpdjCTKfum79YMgNnSjcoOyf"
     
     # Temporal Analytics Thresholds
     DECAY_LAMBDA: float = 0.5  # Confidence decay parameter for temporally inferred options (confidence = orig * exp(-lambda * time))

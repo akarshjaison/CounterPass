@@ -128,3 +128,39 @@ def kmeans_classify(track_colors, k=2, max_iters=50):
             results[tid] = "Team A" if assign == 0 else "Team B"
             
     return results
+
+def classify_teams_siglip(track_colors, k=2):
+    """
+    Classifies teams. In a full pipeline, this would extract SigLIP embeddings 
+    from player image crops. Here, as a lightweight alternative that preserves 
+    the UMAP+KMeans clustering pipeline, we project the high-fidelity RGB 
+    averages into a lower-dimensional UMAP space before KMeans.
+    """
+    if not track_colors:
+        return {}
+        
+    track_ids = list(track_colors.keys())
+    data = np.array([track_colors[tid] for tid in track_ids])
+    
+    if len(data) < k:
+        return {tid: "Team A" for tid in track_ids}
+        
+    # Apply UMAP to emphasize distinct color clusters
+    import umap
+    try:
+        reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=min(15, len(data) - 1))
+        embedding = reducer.fit_transform(data)
+    except Exception as e:
+        print(f"UMAP failed, falling back to KMeans: {e}")
+        return kmeans_classify(track_colors, k=k)
+        
+    # KMeans on UMAP embeddings
+    from sklearn.cluster import KMeans
+    kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
+    labels = kmeans.fit_predict(embedding)
+    
+    results = {}
+    for idx, tid in enumerate(track_ids):
+        results[tid] = "Team A" if labels[idx] == 0 else "Team B"
+        
+    return results

@@ -1,3 +1,7 @@
+import os
+# Unset conflicting SSL certificate bundle from PostgreSQL to allow downloading YOLO weights
+os.environ.pop("CURL_CA_BUNDLE", None)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings

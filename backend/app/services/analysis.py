@@ -64,32 +64,52 @@ def _run_analysis_worker(job_id: int):
         db.commit()
 
         stages = [
-            ("Extracting Frames", 15.0),
-            ("Detecting Players & Ball", 35.0),
-            ("Tracking Movement & Teams", 55.0),
-            ("Analyzing Possession & Lanes", 75.0),
-            ("Evaluating Passing Decisions", 90.0),
+            ("Extracting Frames", 0.0, 15.0),
+            ("Detecting Players & Ball", 15.0, 35.0),
+            ("Tracking Movement & Teams", 35.0, 55.0),
+            ("Analyzing Possession & Lanes", 55.0, 75.0),
+            ("Evaluating Passing Decisions", 75.0, 90.0),
         ]
 
+        # Initialize Pitch Calibrator
+        calibrator = None
+
         # Run stage processing
-        for stage_name, progress_pct in stages:
+        for stage_name, start_pct, end_pct in stages:
             job.current_stage = stage_name
-            job.progress = progress_pct
+            job.progress = start_pct
             db.commit()
             
             if stage_name == "Detecting Players & Ball":
                 video_path = job.video.path if job.video else None
                 if video_path:
-                    run_player_detection(db, job_id, video_path)
+                    import cv2
+                    from app.services.calibration import PitchCalibrator
+                    from app.core.config import settings
+                    import os
+                    
+                    # Calibrate pitch homography from first frame
+                    pitch_model_path = os.path.join(settings.MODELS_DIR, "pose_field.pt")
+                    calibrator = PitchCalibrator(pitch_model_path)
+                    
+                    cap = cv2.VideoCapture(video_path)
+                    ret, frame = cap.read()
+                    cap.release()
+                    if ret:
+                        calibrator.calibrate_from_frame(frame)
+                        
+                    run_player_detection(db, job_id, video_path, start_pct, end_pct)
             elif stage_name == "Tracking Movement & Teams":
                 _ensure_player_tracks(db, job_id)
             elif stage_name == "Evaluating Passing Decisions":
                 fps = job.video.fps or 30.0
                 width = job.video.width or 1920
                 height = job.video.height or 1080
-                run_tactical_analysis(db, job_id, fps, width, height)
-            else:
+                run_tactical_analysis(db, job_id, fps, width, height, calibrator)
                 time.sleep(1.0)  # Small delay between stages
+
+            job.progress = end_pct
+            db.commit()
 
         # Finalize: generate annotated video
         time.sleep(1.0)

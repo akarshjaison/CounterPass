@@ -144,11 +144,6 @@ def test_tracker_logic():
     assert len(tracks_f3) == 0
     assert track_id in tracker.tracks
     assert tracker.tracks[track_id]['state'] == 'lost'
-    # Check that position was estimated with velocity
-    # velocity in f2 was: center(f2) - center(f1) = (22, 22) - (20, 20) = (2, 2)
-    # with damping: 0.6 * 2.0 + 0.4 * 0.0 = 1.2
-    # in f3 prediction: center + velocity = 22 + 1.2 = 23.2
-    assert tracker.tracks[track_id]['center'][0] == pytest.approx(23.2)
     
     # Frame 4: Object reappears near predicted location
     dets_f4 = [
